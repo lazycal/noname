@@ -8,6 +8,8 @@
 #include <string>
 #include <torch/extension.h>
 #include "dbug_logging.h"
+// #include "udp.h"
+
 #ifdef HAVE_CUDA
 #include "helper_cuda.h"
 #include <cuda_runtime.h>
@@ -29,15 +31,15 @@ struct LayerInfo {
   std::string name;
   size_t size;
   torch::Tensor tensor;
-  int priority, iter;
+  int priority, idx, iter;
   int cnt; // used in PS
   void *buf;
   int w_recv_cnt; // TODO: move the fields for PS to a new class.
   std::vector<std::vector<uint8_t>> worker_bufs; // TODO: flattened 2d array
 
   LayerInfo(const std::string &name, size_t size, torch::Tensor tensor,
-            int priority, int nw = 0)
-      : name(name), size(size), tensor(tensor), priority(priority),
+            int priority, int idx, int nw = 0)
+      : name(name), size(size), tensor(tensor), priority(priority), idx(idx),
         iter(cur_iter), w_recv_cnt(0), worker_bufs(nw, std::vector<uint8_t>(size, 0)) {
     if (tensor.device().is_cuda())
       _malloc(&buf, size);
@@ -50,7 +52,7 @@ struct LayerInfo {
   }
 };
 std::ostream &operator<<(std::ostream &os, const LayerInfo &li) {
-  os << "LayerInfo(name=" << li.name << ", size=" << li.size
+  os << "LayerInfo(id=" << li.idx << ", name=" << li.name << ", size=" << li.size
      << ", priority=" << li.priority << ")";
   return os;
 }
@@ -65,15 +67,16 @@ struct LayerInfoMini {
 
 std::map<std::string, LayerInfo *>
     _lis; // TODO: move _lis inside a class to better hide it. // TODO: extern
+static std::map<std::string, int> _layer_id; // HACK
 const std::map<std::string, LayerInfo *> &lis = _lis;
 
-void declare(std::string name) { _lis[name] = nullptr; }
+void declare(std::string name, int idx) { _lis[name] = nullptr;  _layer_id[name] = idx; }
 LayerInfo *get_or_register_layer(const std::string &name, size_t size,
                                  torch::Tensor tensor, int priority, int nw = 0) {
   ASSERT(_lis.find(name) != _lis.end()) << name;
   auto &res = _lis[name];
   if (res == nullptr) {
-    res = new LayerInfo(name, size, tensor, priority, nw); // TODO: barrier?
+    res = new LayerInfo(name, size, tensor, priority, _layer_id[name], nw); // TODO: barrier?
     std::cout << "registering " << *res << "\n";
   }
   return res;

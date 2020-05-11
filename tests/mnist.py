@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
 import torch.utils.data.distributed
-import noname.torch as bps
+import noname.nonametorch as bps
 from time import time, sleep
 
 # Training settings

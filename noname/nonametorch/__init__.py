@@ -19,13 +19,13 @@ from __future__ import division
 from __future__ import print_function
 
 
-import noname.torch.ops
-from noname.torch.ops import push_pull_async_inplace as noname_push_pull
-# from noname.torch.ops import push_pull
-from noname.torch.ops import synchronize, declare, declare_done
-from noname.torch.ops import init, shutdown
-from noname.torch.ops import size, local_size, rank, local_rank
-from noname.torch.compression import Compression
+import noname.nonametorch.ops
+from noname.nonametorch.ops import push_pull_async_inplace as noname_push_pull
+# from noname.nonametorch.ops import push_pull
+from noname.nonametorch.ops import synchronize, declare, declare_done
+from noname.nonametorch.ops import init, shutdown
+from noname.nonametorch.ops import size, local_size, rank, local_rank
+from noname.nonametorch.compression import Compression
 
 import os
 import torch
@@ -96,11 +96,11 @@ class _DistributedOptimizer(torch.optim.Optimizer):
             self._register_hooks()
 
             # declare tensors
-            for name in sorted(self._parameter_names.values()):
+            for idx, name in enumerate(sorted(self._parameter_names.values())):
                 p = self._named_parameters[name]
                 if p.requires_grad:
                     p.grad = p.data.new(p.size()).zero_()
-                    declare("Gradient."+name)
+                    declare("Gradient."+name, idx)
                     # handle = noname_push_pull(p.grad, average=False, name="Gradient."+name)
             # We use two loops for load-balancing
             # for name in sorted(self._bn_named_param.keys()):
@@ -226,11 +226,11 @@ class _DistributedOptimizer(torch.optim.Optimizer):
         #             self._handles[p] = (handle, ctx)
 
         #     self.synchronize()
-        #     noname.torch.ops.step()
+        #     noname.nonametorch.ops.step()
         #     return loss
         # else:
             self.synchronize()
-            noname.torch.ops.step()
+            noname.nonametorch.ops.step()
             return super(self.__class__, self).step(closure)
 
 
