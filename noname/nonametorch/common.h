@@ -8,7 +8,6 @@
 #include <string>
 #include <torch/extension.h>
 #include "dbug_logging.h"
-#include "udp.h"
 
 #ifdef HAVE_CUDA
 #include "helper_cuda.h"
@@ -24,11 +23,19 @@ void _free(void *ptr) { free(ptr); }
 const std::string HAND_SHAKE_MSG = "noname__start!";
 const std::string SHUTDOWN_MSG = "#SHUTDOWN#";
 
-const int LOSS_RATE = 90; // /100
+const int MAX_BYTES_AVAI = 10000;
+const int SLICE_SIZE = 512;
+static_assert(SLICE_SIZE % 4 == 0, "SLICE_SIZE % 4 !=0");
+#ifndef SR
+#define SR 10000 // Bytes per milisecond
+#endif
+#ifndef LOSS_RATE
+#define LOSS_RATE 90 // /100
+#endif
 inline int CEIL(int x, int y) { return (x + y - 1) / y; }
 bool layer_enough(int slc_cnt, size_t size, int SLICE_SIZE) {
   int n_slc = CEIL(size, SLICE_SIZE);
-  return slc_cnt * 100 >= n_slc * LOSS_RATE; // TODO: make it lossy
+  return slc_cnt * 100 >= n_slc * LOSS_RATE;
 }
 
 int cur_iter = 0; // TODO: extern
@@ -47,13 +54,15 @@ struct LayerInfo {
   std::vector<std::vector<uint8_t>> worker_bufs; // TODO: flattened 2d array
   std::vector<std::vector<int>> w_slc_it;
   std::vector<int> w_slc_recv_cnt, w_iter;
+  std::vector<std::vector<int>> ack;
+  uint8_t *ps_buf[2];
 
   LayerInfo(const std::string &name, size_t size, torch::Tensor tensor,
             int priority, int idx, int nw)
       : name(name), size(size), tensor(tensor), priority(priority), idx(idx),
         iter(cur_iter), worker_bufs(nw, std::vector<uint8_t>(size, 0)),
         w_slc_it(nw, std::vector<int>(CEIL(size, SLICE_SIZE), 0)), w_slc_recv_cnt(nw, 0),
-        w_iter(nw, 0)
+        w_iter(nw, 0), ack(nw, std::vector<int>(CEIL(size, SLICE_SIZE), 0))
          {
     ASSERT(size < 1ll << 31) << "size=" << size << " too long.";
     if (tensor.device().is_cuda()) {
@@ -62,10 +71,15 @@ struct LayerInfo {
       buf = reinterpret_cast<uint8_t*>(tmp);
     } else
       buf = reinterpret_cast<uint8_t*>(tensor.data_ptr<float>());
+    ps_buf[0] = buf;
+    void *tmp;
+    _malloc(&tmp, size);
+    ps_buf[1] = reinterpret_cast<uint8_t*>(tmp);
   }
   ~LayerInfo() {
     if (tensor.device().is_cuda())
       _free(reinterpret_cast<void*>(buf));
+    _free(reinterpret_cast<void*>(ps_buf[1]));
   }
 };
 std::ostream &operator<<(std::ostream &os, const LayerInfo &li) {
@@ -136,6 +150,11 @@ int config_get_rank() {
   auto p = getenv("DMLC_WORKER_ID");
   assert(p);
   return atoi(p);
+}
+
+int config_get_rank2() {
+  if (config_get_role() == "server") return -1;
+  else return config_get_rank();
 }
 
 std::string config_get_worker_ip() {

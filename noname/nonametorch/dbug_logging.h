@@ -41,7 +41,7 @@ namespace MYLog {
 enum loglevel { NONE = 7, FATAL = 6, ERROR = 5, WARNING = 4, EMPH = 3, INFO = 2, DEBUG = 1, EVERYTHING = 0 };
 
 #ifndef MYLOG_LEVEL
-#define MYLOG_LEVEL MYLog::EVERYTHING
+#define MYLOG_LEVEL MYLog::INFO
 #endif
 
 /**

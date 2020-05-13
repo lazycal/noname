@@ -13,10 +13,16 @@
 #include <thread>
 #include <torch/extension.h>
 
-// using PushPull=VanillaPushPull;
-// using PSAlias=VanillaPS;
-using PushPull=LossyPushPull;
-using PSAlias=LossyPS;
+#ifndef PP_METHOD
+#define PP_METHOD 1 // for udp; 0 for tcp
+#endif
+#if PP_METHOD == 0
+using PushPullMethod=VanillaPushPull;
+using PSMethod=VanillaPS;
+#elif PP_METHOD == 1
+using PushPullMethod=LossyPushPull;
+using PSMethod=LossyPS;
+#endif
 class CommunicationManager {
 public:
   const std::map<std::string, LayerInfo *> &lis;
@@ -24,7 +30,7 @@ public:
   std::unique_ptr<PushPullProtocol> p3;
   CommunicationManager(const std::map<std::string, LayerInfo *> &lis)
       : lis(lis) {}
-  void set_p3() { p3 = std::make_unique<PushPull>(); }
+  void set_p3() { p3 = std::make_unique<PushPullMethod>(); }
   void push_pull(std::string name) {
     auto it = lis.find(name);
     assert(it != lis.end());
@@ -125,7 +131,7 @@ std::string push_pull_async_inplace(torch::Tensor tensor, int average,
 
 void synchronize(const std::string &name) {
   auto li = lis.find(name)->second;
-  MYLOG(1) << "["
+  MYLOG(2) << "["
            << "cur_iter=" << cur_iter << "] synchronize: " << *li;
   std::unique_lock<std::mutex> lk(li->d_mutex);
   li->d_condition.wait(lk, [&] {
@@ -139,7 +145,7 @@ void declare_done() {
   auto role = config_get_role();
   if (role == "server") {
     std::cout << "launching server...\n";
-    auto p = new PSAlias();
+    auto p = new PSMethod();
     p->run();
   } else {
     std::cout << "launching worker...\n";

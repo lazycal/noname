@@ -7,6 +7,13 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 with_cuda = torch.cuda.is_available()
 cflags = ['-O2', '-g', '-Wall', '-std=c++17', '`pkg-config libzmq --cflags`']
 cflags += ['-DHAVE_CUDA'] if with_cuda else []
+
+if 'MYLOG_LEVEL' in os.environ: cflags += [f"-DMYLOG_LEVEL={os.environ['MYLOG_LEVEL']}"]
+if 'LOSS_RATE' in os.environ: cflags += [f"-DLOSS_RATE={100-int(os.environ['LOSS_RATE'])}"]
+if 'SR' in os.environ: cflags += [f"-DSR={os.environ['SR']}"] # send rate
+if 'PP_METHOD' in os.environ:
+    assert os.environ['PP_METHOD'] in ['0', '1']
+    cflags += [f"-DPP_METHOD={os.environ['PP_METHOD']}"]
 base_dir = os.path.dirname(os.path.abspath(__file__))
 c_lib = load(name='noname.nonametorch.c_lib', sources=[os.path.join(base_dir, 'c_lib.cpp')], verbose=True,
              extra_cflags=cflags, with_cuda=with_cuda, extra_ldflags=['-lpthread', '`pkg-config libzmq --libs`'],

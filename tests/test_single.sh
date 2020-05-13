@@ -7,9 +7,9 @@ CUDA_VISIBLE_DEVICES='' DMLC_ROLE=server python -u ../tests/cifar10-resnet9.py -
 sleep 2
 DMLC_ROLE=worker DMLC_WORKER_ID=0 WORKER_IP=127.0.0.1 python -u ../tests/cifar10-resnet9.py --log $1 > $1/worker0.log 2>$1/worker0.err || true &
 # sleep 5
-CUDA_VISIBLE_DEVICES='1,0' DMLC_ROLE=worker DMLC_WORKER_ID=1 WORKER_IP=127.0.0.1 python -u ../tests/cifar10-resnet9.py --log $1 > $1/worker1.log 2>$1/worker1.err || true
-# DMLC_ROLE=worker DMLC_WORKER_ID=2 WORKER_IP=127.0.0.1 python -u ../tests/cifar10-resnet9.py --log $1 > $1/worker2.log 2>$1/worker2.err || true &
-# DMLC_ROLE=worker DMLC_WORKER_ID=3 WORKER_IP=127.0.0.1 python -u ../tests/cifar10-resnet9.py --log $1 > $1/worker3.log 2>$1/worker3.err || true &
+DMLC_ROLE=worker DMLC_WORKER_ID=1 WORKER_IP=127.0.0.1 python -u ../tests/cifar10-resnet9.py --log $1 > $1/worker1.log 2>$1/worker1.err || true
+# DMLC_ROLE=worker DMLC_WORKER_ID=2 WORKER_IP=127.0.0.1 python -u ../tests/cifar10-resnet9.py --log $1  > $1/worker2.log 2>$1/worker2.err || true &
+# DMLC_ROLE=worker DMLC_WORKER_ID=3 WORKER_IP=127.0.0.1 python -u ../tests/cifar10-resnet9.py --log $1  > $1/worker3.log 2>$1/worker3.err || true &
 
 # read 
 

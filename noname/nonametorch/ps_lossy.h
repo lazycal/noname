@@ -5,9 +5,10 @@
 #include <zmq.hpp>
 #include <cstdlib>
 #include "ps.h"
+#include "udp.h"
 
 class UDPBcast {
-  std::vector<UDPSocket> udps;
+  std::vector<std::unique_ptr<UDPSocket>> udps;
   std::vector<std::thread*> thrds;
   ThreadSafeQueue<Message> recv_q;
 
@@ -15,19 +16,26 @@ public:
   UDPBcast(){}
   void init(const std::vector<std::string> &ip_ports) {
     udps.reserve(ip_ports.size());
+    int i = 0;
     for (auto ip_port : ip_ports) {
-      udps.emplace_back(&recv_q);
+      udps.emplace_back(std::make_unique<UDPSocket>(i++, &recv_q));
       auto &udp = udps.back();
       std::cout << "binding to " + ip_port << "\n";
-      udp.bind(ip_port);
-      thrds.push_back(new std::thread([&] { udp.run(); }));
+      udp->bind(ip_port);
+      thrds.push_back(new std::thread([&] { udp->run(); }));
     }
   }
   
+  void lossy_bound_send(LayerInfo *li, int iter) {
+    for (auto &sender : udps) {
+      sender->lossy_bound_send(li, iter);
+    }
+  }
+
   std::vector<int> send(Message msg) {
     std::vector<int> res;
     for (auto &sender : udps) {
-      res.push_back(sender.send(msg));
+      res.push_back(sender->send(msg));
     }
     return res;
   }
@@ -72,27 +80,23 @@ void LossyPS::run_sender() {
     auto li = lis.find(name)->second;
     // TODO: copy ps and iter before sending
     int tmp = li->acc_iter;
+    li->iter = tmp - 1;
     MYLOG(1) << "sending " << name << " iter=" << tmp - 1;
-    for (int i = 0; i < CEIL(li->size, SLICE_SIZE); ++i) {
-      Message msg; msg.resize(sizeof(Request));
-      auto req = reinterpret_cast<Request*>(msg.data());
-      req->type = Request::LS;
-      req->ls.initMeta(li->idx, li->priority, -1, i, li->acc_iter - 1);
-      if (tmp != li->acc_iter) {
-        MYLOG(2) << "[warning] tmp=" << tmp << " != li->acc_iter=" << li->acc_iter << " for " << li->name;
-        break;
-      }
-      int st = SLICE_SIZE * i;
-      memcpy(req->ls.data, li->buf + st, std::min(SLICE_SIZE, (int)li->size - st));
-      auto res = udp.send(msg);
-    }
-    // for (auto res : ress)
-    //     ASSERT(res.has_value() && res.value() == li->size)
-    //         << res.has_value() << ", " << res.value() << ", " << li->size;
+    udp.lossy_bound_send(li, tmp - 1);
+    // for (int i = 0; i < CEIL(li->size, SLICE_SIZE); ++i) {
+    //   Message msg; msg.resize(sizeof(Request));
+    //   auto req = reinterpret_cast<Request*>(msg.data());
+    //   req->type = Request::LS;
+    //   req->ls.initMeta(li->idx, li->priority, -1, i, li->acc_iter - 1);
+    //   if (tmp != li->acc_iter) {
+    //     MYLOG(2) << "[warning] tmp=" << tmp << " != li->acc_iter=" << li->acc_iter << " for " << li->name;
+    //     break;
+    //   }
+    //   int st = SLICE_SIZE * i;
+    //   memcpy(req->ls.data, li->ps_buf + st, std::min(SLICE_SIZE, (int)li->size - st));
+    //   auto res = udp.send(msg);
     // }
-
-    // send...
-    // std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    
   }
 }
 
@@ -133,11 +137,11 @@ void LossyPS::run_recver() {
           if (req->ls.iter != li->acc_iter) continue;
           ASSERT(req->ls.iter >= iter_cnt) << "req->ls.iter=" << req->ls.iter << "iter_cnt=" << iter_cnt;
           iter_cnt = std::max(iter_cnt, req->ls.iter);
-          MYLOG(1) << "recving " << name + " " << req->ls;
           int rank = req->ls.rank;
+          MYLOG(1) << "recving " << name + " " << req->ls << " " << "iter=" << li->w_iter[rank];
           if (li->w_recv_cnt == 0 && li->dirty) { // clear the server's buffer
-            // memset(li->buf, 0, li->size);
-            li->tensor.zero_(); // TODO: copy to another place for sender before clearing
+            memset(li->ps_buf[li->acc_iter&1], 0, li->size);
+            // li->tensor.zero_();
             li->dirty = false;
           }
           // copy
@@ -145,17 +149,19 @@ void LossyPS::run_recver() {
           // memcpy(li->worker_bufs[rank].data() + st, req->ls.data, plen);
           auto &slc_it = li->w_slc_it[rank][req->ls.sid];
           ASSERT(slc_it <= li->acc_iter + 1) << slc_it << " acc_iter=" << li->acc_iter;
-          if (slc_it == li->acc_iter) {
-            ++slc_it;
-            float *ps = reinterpret_cast<float*>(li->buf + st),
+          MYLOG(1) << "test1 " << li->acc_iter << " " << name;
+          if (slc_it <= li->acc_iter) {
+            slc_it = li->acc_iter + 1;
+            float *ps = reinterpret_cast<float*>(li->ps_buf[li->acc_iter&1] + st),
                   *wr = reinterpret_cast<float*>(req->ls.data);
                   //, *wr = (float *)(&li->worker_bufs[rank].front());
             ASSERT(li->size % sizeof(float) == 0) << li->size;
             int num_params = plen / sizeof(float);
-            // TODO: consider copy the ps to avoid being corrupted by next iter's
             for (int i = 0; i < num_params; ++i)
               ps[i] += wr[i];
-            if (layer_enough(++li->w_slc_recv_cnt[rank], li->size, SLICE_SIZE) 
+            // MYLOG(2) << name << " li->w_slc_recv_cnt[rank]=" << li->w_slc_recv_cnt[rank];
+            MYLOG(1) << "test " << li->acc_iter << " " << name;
+            if (layer_enough(++li->w_slc_recv_cnt[rank], li->size, SLICE_SIZE)
                 && li->w_iter[rank] == li->acc_iter) {
               li->w_iter[rank]++; // only count once for each worker
               // do the average
@@ -164,7 +170,9 @@ void LossyPS::run_recver() {
                   ps[i] /= nw;
                 li->w_recv_cnt = 0;
                 li->acc_iter++; // TODO: race? sender seems to need this.
+                for (int i = 0; i < nw; ++i) li->w_slc_recv_cnt[i] = 0;
                 li->dirty = true;
+                MYLOG(1) << name << " recv done. iter=" << li->acc_iter - 1;
                 // end for this iteration for this layer
                 // if modify this closing behavior, then dirty should be modified correspondingly
                 task_q.enqueue(name);
@@ -179,12 +187,7 @@ void LossyPS::run_recver() {
 }
 
 [[ noreturn ]] void LossyPS::run() {
-  /* 
-  * PS create receiver. Workers create sender, receiver
-  * Workers -> PS: HANDSHAKE, IP:PORT
-  * PS create sender
-  * PS -> workers: HANDSHAKE
-  */
+  std::cout << "Running LossyPS\n";
   std::vector<std::string> ip_ports;
   for (int i = 0; i < this->nw; ++i) ip_ports.push_back(config_get_PS_ip_port(i));
   udp.init(ip_ports);  

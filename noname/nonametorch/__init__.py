@@ -70,7 +70,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
                 # there is an issue when using torch.Tensor as key, so use its hash instead
                 # https://github.com/pytorch/pytorch/issues/7733
                 named_parameters.extend(list(self._bn_named_param.items()))
-                print(named_parameters)
+                # print(named_parameters)
                 self._parameter_names = {v.__hash__(): k for k, v
                                          in sorted(named_parameters)}
                 # self._tensor_list = [tensor for name, tensor in named_parameters]
@@ -132,7 +132,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
                 bn_modules[f'BN{cnt}.running_mean'] = module
                 bn_modules[f'BN{cnt}.running_var'] = module
                 cnt += 1
-        print(res)
+        # print(res)
         return res, bn_modules
 
     def _register_bn_hooks(self):

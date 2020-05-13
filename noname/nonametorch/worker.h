@@ -108,6 +108,7 @@ void VanillaPushPull::run_recver(zmq::socket_t &receiver) {
 }
 
 void VanillaPushPull::run() {
+  std::cout << "Running VanillaPushPull\n";
   zmq::socket_t receiver(context, ZMQ_PULL);
   int port_num = -1;
   for (int i = 0; i < 1000; ++i) {

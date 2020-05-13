@@ -1,9 +1,10 @@
 #include "worker.h"
+#include "udp.h"
 
 class LossyPushPull : public PushPullProtocol {
 private:
   ThreadSafeQueue<LayerInfo *> task_q, handshake_q, shutdown_q;
-  UDPSocket udp;
+  UDPSocket udp{0};
 public:
   void push(std::string name) override {
     auto li = lis.find(name)->second;
@@ -11,6 +12,7 @@ public:
     task_q.enqueue(li);
   }
   void run() override {
+    std::cout << "Running LossyPushPull\n";
     int port_num = -1;
     for (int i = 0; i < 1000; ++i) {
       try {
@@ -52,6 +54,8 @@ public:
       auto it = task_q.dequeue(), li = it;
       if (li == nullptr) {
         std::cout << "sender shutting down\n";
+        std::this_thread::sleep_for(std::chrono::seconds(3));
+        exit(0);
         // TODO: below
         // auto msg = create_str_msg(SHUTDOWN_MSG);
         // udp.send(msg, true);
@@ -60,20 +64,21 @@ public:
       }
       int tmp = cur_iter;
       MYLOG(1) << "sending " << li->name << " with cur_iter=" << cur_iter;
-      for (int i = 0; i < CEIL(li->size, SLICE_SIZE); ++i) {
-        Message msg; msg.resize(sizeof(Request));
-        auto req = reinterpret_cast<Request*>(msg.data());
-        req->type = Request::LS;
-        if (tmp != cur_iter) {
-          MYLOG(2) << "[warning] tmp=" << tmp << " != cur_iter=" << cur_iter << " for " << li->name;
-          break;
-        }
-        // TODO: barrier or lock for cur_iter?
-        req->ls.initMeta(li->idx, li->priority, config_get_rank(), i, cur_iter);
-        int st = SLICE_SIZE * i;
-        memcpy(req->ls.data, li->buf + st, std::min(SLICE_SIZE, (int)li->size - st));
-        auto res = udp.send(msg);
-      }
+      udp.lossy_bound_send(li, cur_iter);
+      // for (int i = 0; i < CEIL(li->size, SLICE_SIZE); ++i) {
+      //   Message msg; msg.resize(sizeof(Request));
+      //   auto req = reinterpret_cast<Request*>(msg.data());
+      //   req->type = Request::LS;
+      //   if (tmp != cur_iter) {
+      //     MYLOG(2) << "[warning] tmp=" << tmp << " != cur_iter=" << cur_iter << " for " << li->name;
+      //     break;
+      //   }
+      //   // TODO: barrier or lock for cur_iter?
+      //   req->ls.initMeta(li->idx, li->priority, config_get_rank(), i, cur_iter);
+      //   int st = SLICE_SIZE * i;
+      //   memcpy(req->ls.data, li->buf + st, std::min(SLICE_SIZE, (int)li->size - st));
+      //   auto res = udp.send(msg);
+      // }
       // send...
       // std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
@@ -99,18 +104,20 @@ public:
         
         case Request::LS: {
           auto name = layer_names[req->ls.idx];
-          if (req->ls.iter != cur_iter) continue;
+          auto li = lis.find(name)->second;
+          int _cur_iter = li->w_iter[0];
+          if (req->ls.iter != _cur_iter) continue;
           MYLOG(1) << "recving " << name + " " << req->ls;
           ASSERT(lis.find(name) != lis.end()) << name << " not found.";
-          auto li = lis.find(name)->second;
           int st = SLICE_SIZE * req->ls.sid;
           auto &slc_it = li->w_slc_it[0][req->ls.sid];
-          if (slc_it > cur_iter) continue; // dup package
-          slc_it++;
+          if (slc_it > _cur_iter) continue; // dup package
+          slc_it = _cur_iter + 1;
           memcpy(li->buf + st, req->ls.data, std::min(SLICE_SIZE, (int)li->size - st));
           if (layer_enough(++li->w_slc_recv_cnt[0], li->size, SLICE_SIZE)
-              && li->w_iter[0] == cur_iter) {
-            li->w_iter[0]++; // only count once
+              && li->w_iter[0] == _cur_iter) {
+            li->w_iter[0]++; // only count once; also close the recv
+            li->w_slc_recv_cnt[0] = 0;
             ready_q.enqueue(li);
           }
           break;

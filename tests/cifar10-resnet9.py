@@ -151,6 +151,7 @@ parser.add_argument('--seed', type=int, default=42, metavar='S',
                     help='random seed (default: 42)')
 parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                     help='how many batches to wait before logging training status')
+parser.add_argument('--log', default='.')
 parser.set_defaults(half=False)
 parser.add_argument('--nohalf', action='store_false', dest='half',
                     help='not use fp16 in training')
@@ -215,7 +216,7 @@ compression = bps.Compression.fp16 if args.fp16_pushpull else bps.Compression.no
 optimizer = bps.DistributedOptimizer(optimizer, model,
                                      named_parameters=model.named_parameters(),
                                      compression=compression)
-
+profile = {'train_loss': [], 'test_acc': []}
 def get_change_scale(scheduler, init_scale=1.0):
     def schedule(e, scale=None, **kwargs):
         lr = scheduler(e, **kwargs)
@@ -255,6 +256,7 @@ def train(epoch):
         if batch_idx % args.log_interval == 0:
             # BytePS: use train_sampler to determine the number of examples in
             # this worker's partition.
+            profile['train_loss'].append(loss.item() / _scale)
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\tlr: {}'.format(
                 epoch, batch_idx * len(data), len(train_sampler),
                 100. * batch_idx / len(train_loader), loss.item() / _scale, lr))
@@ -292,16 +294,24 @@ def test():
     # test_accuracy = metric_average(test_accuracy, 'avg_accuracy')
 
     # BytePS: print output only on first rank.
-    if bps.rank() == 0:
-        print('\nTest set: Average loss: {:.4f}, Accuracy: {:.2f}%\n'.format(
-            test_loss, 100. * test_accuracy))
+    # if bps.rank() == 0:
+    print('\nTest set: Average loss: {:.4f}, Accuracy: {:.2f}%\n'.format(
+        test_loss, 100. * test_accuracy))
+    profile['test_acc'].append(100. * test_accuracy.item())
 
 
 import time
 st = time.time()
+profile['epoch_time'] = []
 for epoch in range(1, args.epochs + 1):
+    st1 = time.time()
     train(epoch)
     test()
-    print("Epoch time: %ss"%((time.time() - st) / epoch))
+    profile['epoch_time'].append(time.time())
+    print("Epoch time: %ss this epoch time: %ss"%((time.time() - st) / epoch, (time.time() - st1)))
 print('total train time=%ss'%(time.time() - st))
+profile['total_time'] = time.time() - st
+import json
+with open(os.path.join(args.log, './profile.json'), 'w') as fout: json.dump(profile, fout)
+print(json)
 bps.shutdown()

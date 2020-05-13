@@ -156,6 +156,7 @@ void VanillaPS::run_recver(zmq::socket_t &receiver) {
   * PS create sender
   * PS -> workers: HANDSHAKE
   */
+  std::cout << "Running VanillaPS\n";
   zmq::socket_t receiver(context, ZMQ_PULL);
   std::cout << "binding " + config_get_PS_ip_port(1) << "\n";
   receiver.bind("tcp://" + config_get_PS_ip_port(1));
