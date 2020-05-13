@@ -5,6 +5,8 @@
 #include <chrono>
 #include <cstring>
 #include <zmq.hpp>
+#include "udp.h"
+
 const int WORKER_BASE_PORT = 9866;
 class PushPullProtocol {
 public:

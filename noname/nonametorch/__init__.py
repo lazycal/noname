@@ -100,7 +100,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
                 p = self._named_parameters[name]
                 if p.requires_grad:
                     p.grad = p.data.new(p.size()).zero_()
-                    declare("Gradient."+name, idx)
+                    declare("Gradient."+name, idx, p.element_size() * p.nelement())
                     # handle = noname_push_pull(p.grad, average=False, name="Gradient."+name)
             # We use two loops for load-balancing
             # for name in sorted(self._bn_named_param.keys()):

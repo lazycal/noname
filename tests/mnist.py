@@ -107,7 +107,7 @@ optimizer = optim.SGD(model.parameters(), lr=args.lr * bps.size(),
 compression = bps.Compression.fp16 if args.fp16_pushpull else bps.Compression.none
 
 # BytePS: wrap optimizer with DistributedOptimizer.
-optimizer = bps.DistributedOptimizer(optimizer,
+optimizer = bps.DistributedOptimizer(optimizer, model,
                                      named_parameters=model.named_parameters(),
                                      compression=compression)
 

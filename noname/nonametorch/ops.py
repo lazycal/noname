@@ -5,7 +5,7 @@ from noname.nonametorch import utils
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 with_cuda = torch.cuda.is_available()
-cflags = ['-g', '-Wall', '-std=c++14', '`pkg-config libzmq --cflags`']
+cflags = ['-O2', '-g', '-Wall', '-std=c++17', '`pkg-config libzmq --cflags`']
 cflags += ['-DHAVE_CUDA'] if with_cuda else []
 base_dir = os.path.dirname(os.path.abspath(__file__))
 c_lib = load(name='noname.nonametorch.c_lib', sources=[os.path.join(base_dir, 'c_lib.cpp')], verbose=True,
@@ -28,9 +28,9 @@ def synchronize(handle):
     return c_lib.synchronize(handle)
 
 
-def declare(name, idx):
-    print('declaring', name, 'with idx', idx)
-    c_lib.declare(name, idx)
+def declare(name, idx, size):
+    print('declaring', name, 'with idx', idx, 'size', size)
+    c_lib.declare(name, idx, size)
 
 
 def declare_done():

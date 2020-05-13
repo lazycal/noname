@@ -1,6 +1,7 @@
 #include "common.h"
 #include "ps.h"
-// #include "ps_lossy.h"
+#include "ps_lossy.h"
+#include "worker_lossy.h"
 #include "utils.h"
 #include "worker.h"
 #include <TH/TH.h>
@@ -12,6 +13,10 @@
 #include <thread>
 #include <torch/extension.h>
 
+// using PushPull=VanillaPushPull;
+// using PSAlias=VanillaPS;
+using PushPull=LossyPushPull;
+using PSAlias=LossyPS;
 class CommunicationManager {
 public:
   const std::map<std::string, LayerInfo *> &lis;
@@ -19,7 +24,7 @@ public:
   std::unique_ptr<PushPullProtocol> p3;
   CommunicationManager(const std::map<std::string, LayerInfo *> &lis)
       : lis(lis) {}
-  void set_p3() { p3 = std::make_unique<VanillaPushPull>(); }
+  void set_p3() { p3 = std::make_unique<PushPull>(); }
   void push_pull(std::string name) {
     auto it = lis.find(name);
     assert(it != lis.end());
@@ -134,7 +139,7 @@ void declare_done() {
   auto role = config_get_role();
   if (role == "server") {
     std::cout << "launching server...\n";
-    auto p = new VanillaPS();
+    auto p = new PSAlias();
     p->run();
   } else {
     std::cout << "launching worker...\n";
@@ -153,7 +158,7 @@ void advance_iter() {
   }
 }
 
-void shutdown() {
+void noname_shutdown() {
   std::cout << "shutting down...\n";
   cm.shutdown();
   std::cout << "shutdown done...\n";
@@ -169,5 +174,5 @@ PYBIND11_MODULE(c_lib, m) {
   m.def("step", &advance_iter, "");
   m.def("declare", &declare, "");
   m.def("declare_done", &declare_done, "");
-  m.def("shutdown", &shutdown, "");
+  m.def("shutdown", &noname_shutdown, "");
 }
