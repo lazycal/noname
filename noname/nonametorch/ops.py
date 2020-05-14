@@ -8,9 +8,12 @@ with_cuda = torch.cuda.is_available()
 cflags = ['-O2', '-g', '-Wall', '-std=c++17', '`pkg-config libzmq --cflags`']
 cflags += ['-DHAVE_CUDA'] if with_cuda else []
 
+if 'ND' in os.environ: cflags += [f"-DNDEBUG"]
+if 'DMLC_RTT' in os.environ: cflags += [f"-DDMLC_RTT={os.environ['DMLC_RTT']}"]
+if 'DMLC_BUC_SZ' in os.environ: cflags += [f"-DDMLC_BUC_SZ={os.environ['DMLC_BUC_SZ']}"]
 if 'MYLOG_LEVEL' in os.environ: cflags += [f"-DMYLOG_LEVEL={os.environ['MYLOG_LEVEL']}"]
 if 'LOSS_RATE' in os.environ: cflags += [f"-DLOSS_RATE={100-int(os.environ['LOSS_RATE'])}"]
-if 'SR' in os.environ: cflags += [f"-DSR={os.environ['SR']}"] # send rate
+if 'SEND_RATE' in os.environ: cflags += [f"-DSEND_RATE={os.environ['SEND_RATE']}"] # send rate
 if 'PP_METHOD' in os.environ:
     assert os.environ['PP_METHOD'] in ['0', '1']
     cflags += [f"-DPP_METHOD={os.environ['PP_METHOD']}"]

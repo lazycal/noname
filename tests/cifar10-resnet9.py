@@ -312,6 +312,7 @@ for epoch in range(1, args.epochs + 1):
 print('total train time=%ss'%(time.time() - st))
 profile['total_time'] = time.time() - st
 import json
-with open(os.path.join(args.log, './profile.json'), 'w') as fout: json.dump(profile, fout)
-print(json)
+idx = os.environ.get('DMLC_WORKER_ID')
+with open(os.path.join(args.log, f'./profile-{idx}.json'), 'w') as fout: json.dump(profile, fout)
+print(profile)
 bps.shutdown()

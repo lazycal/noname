@@ -9,6 +9,7 @@
 #include "utils.h"
 #include "dbug_logging.h"
 #include "common.h"
+#include <cstdio>
 
 struct LayerSlice {
   int idx, priority, rank, sid, iter;
@@ -51,6 +52,40 @@ struct Response {
 };
 static_assert(sizeof(Request) != sizeof(Response), "sizeof(Request) != sizeof(Response)");
 
+class Message1 {
+  int len{0};
+  std::shared_ptr<char>p;
+public:
+  Message1(char *s, char *t): p(std::shared_ptr<char>(new char[len], std::default_delete<char[]>())) {
+    memcpy(p.get(), s, t-s);
+  }
+  Message1() {}
+  Message1& operator=(const Message1 &o) { 
+    len = o.len;
+    // p = o.p;
+    p = std::shared_ptr<char>(new char[len], std::default_delete<char[]>());
+    memcpy(p.get(), o.p.get(), len);
+    return *this;
+  }
+  void resize(int nlen) {
+    assert(len == 0);
+    len = nlen;
+    p = std::shared_ptr<char>(new char[len], std::default_delete<char[]>());
+  }
+  Message1(const Message1 &o) {
+    len = o.len;
+    // p = o.p;
+    p = std::shared_ptr<char>(new char[len], std::default_delete<char[]>());
+    memcpy(p.get(), o.p.get(), len);
+  }
+  char* data() const {
+    return p.get();
+  }
+  size_t size() const {
+    return len;
+  }
+  operator std::string() const { return std::string(p.get(), len); }
+};
 using Message=std::string;
 Message create_str_msg(std::string s) {
   Message msg;
@@ -62,17 +97,24 @@ Message create_str_msg(std::string s) {
   return msg;
 }
 
+#ifndef DMLC_RTT
+#define DMLC_RTT 10 // Bytes per milisecond
+#endif
+#ifndef DMLC_BUC_SZ
+#define DMLC_BUC_SZ 100 // /100
+#endif
 class UDPSocket {
 private:
   struct info {
     LayerInfo *li;
     int iter;
     std::chrono::steady_clock::time_point ms;
+    Message m;
   };
   ThreadSafeQueue<Message> *recv_q, *send_q;
   ThreadSafeQueue<info> layer_q, ack_q;
   bool del{false};
-  int fd, rtt{100}, peer_rank; // TODO: measure rtt
+  int fd, rtt{DMLC_RTT}, peer_rank, wind_sz{DMLC_BUC_SZ}; // TODO: measure rtt
   std::thread *_t;
 public:
   bool connected{false};
@@ -109,9 +151,14 @@ public:
       auto inf = layer_q.dequeue();
       int n_ack = 0;
       LayerInfo *li = inf.li;
+      if (li == nullptr) { // it's an ack
+        recv_ack(inf.m);
+        continue;
+      }
       int iter = inf.iter;
       bool expired = false, is_worker = config_get_role() == "worker";
       auto begin = std::chrono::steady_clock::now();
+      MYLOG(2) << "udp sending " << li->name << " iter=" << iter << " peer=" << peer_rank << " send_q.size=" << send_q->q.size();
       for (int i = 0; i < CEIL(li->size, SLICE_SIZE); ++i) {
         // ASSERT(li->ack[peer_rank][i] >= iter) << li->ack[peer_rank][i] << " " << iter;
         if (li->ack[peer_rank][i] > iter) {
@@ -136,7 +183,7 @@ public:
         inf.ms = begin + std::chrono::milliseconds(rtt);
         ack_q.enqueue(inf);
       } else {
-        MYLOG(1) << "Sent " << li->name << " with iter=" << iter << 
+        MYLOG(2) << "Sent " << li->name << " with iter=" << iter << 
         " expired=" << expired << " n_ack=" << n_ack;
       }
     }
@@ -148,8 +195,7 @@ public:
 
   // IMPORTANT: when you send, you must have connected beforehand
   int send(const Message &m) {
-    // TODO: congestion control and sequence number
-    send_q->enqueue(m);
+    send_q->enqueue(m, wind_sz);
     return 0;
   }
 
@@ -210,8 +256,9 @@ public:
   void refill(int &bytes_avai, std::chrono::steady_clock::time_point &begin) {
     auto end = std::chrono::steady_clock::now();
     int el = std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
-    bytes_avai = std::min(MAX_BYTES_AVAI * 1ll, 1ll * SR * el);
+    bytes_avai = std::min(MAX_BYTES_AVAI * 1ll, 1ll * SEND_RATE * el);
     begin = end;
+    MYLOG(1) << "refilling to " << bytes_avai << " with el=" << el/1000. << "s";
   }
 
   void run_sender() {
@@ -224,7 +271,6 @@ public:
         refill(bytes_avai, begin);
         if (bytes_avai < 0) std::this_thread::sleep_for(std::chrono::milliseconds(100));
         else break;
-        MYLOG(1) << "refilling to " << bytes_avai;
       }
       // if bytes_avai > 0 then considered available for sending
       int n;
@@ -233,7 +279,7 @@ public:
         assert(false);
       }
       ASSERT(n == sizeof(Request) || n == sizeof(Response)) << n;
-      bytes_avai -= n;
+      bytes_avai -= n + 28;
       // if ((i & 0xf) == 0) refill(bytes_avai, begin);
     }
   }
@@ -244,20 +290,27 @@ public:
     Message am; am.resize(sizeof(Response));
     auto rp = reinterpret_cast<Response*>(am.data());
     rp->idx = rq->ls.idx; rp->sid = rq->ls.sid; rp->iter = rq->ls.iter + 1;
+    // MYLOG(2) << "sending ack " << + rp->idx << " iter=" << rp->iter - 1 << " sid="  << rp->sid;
     send(am);
   }
 
   void recv_ack(Message &m) {
     auto rp = reinterpret_cast<Response*>(m.data());
     auto li = lis.find(layer_names.find(rp->idx)->second)->second;
-    if (li->ack[peer_rank][rp->sid] < rp->iter)
+    if (li->ack[peer_rank][rp->sid] < rp->iter) {
       li->ack[peer_rank][rp->sid] = rp->iter;
+      MYLOG(2) << "ack " + li->name << " iter=" << rp->iter - 1 << " sid="  << rp->sid;
+    }
     // TODO: fence
   }
 
   void do_ack(Message &m) {
     if (m.size() == sizeof(Request)) send_ack(m);
-    else recv_ack(m);
+    else {
+      info inf{nullptr};
+      inf.m = m;
+      layer_q.enqueue(inf);//recv_ack(m);
+    }
   }
 
   void run_recver() {
@@ -279,7 +332,10 @@ public:
       ASSERT(n == sizeof(Request) || n == sizeof(Response)) << n;
       Message m(buffer, buffer+n);
       do_ack(m);
-      if (m.size() == sizeof(Request)) recv_q->enqueue(m); // TODO force copy
+      if (m.size() == sizeof(Request)) {
+        recv_q->enqueue(m); // TODO force copy
+        if (rand() % 100 < 1) MYLOG(2) << "recv qsize=" << recv_q->q.size();
+      }
     }
   }
 

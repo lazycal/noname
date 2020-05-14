@@ -23,11 +23,11 @@ void _free(void *ptr) { free(ptr); }
 const std::string HAND_SHAKE_MSG = "noname__start!";
 const std::string SHUTDOWN_MSG = "#SHUTDOWN#";
 
-const int MAX_BYTES_AVAI = 10000;
+const int MAX_BYTES_AVAI = 100000;
 const int SLICE_SIZE = 512;
 static_assert(SLICE_SIZE % 4 == 0, "SLICE_SIZE % 4 !=0");
-#ifndef SR
-#define SR 10000 // Bytes per milisecond
+#ifndef SEND_RATE
+#define SEND_RATE 10000 // Bytes per milisecond
 #endif
 #ifndef LOSS_RATE
 #define LOSS_RATE 90 // /100
@@ -35,7 +35,7 @@ static_assert(SLICE_SIZE % 4 == 0, "SLICE_SIZE % 4 !=0");
 inline int CEIL(int x, int y) { return (x + y - 1) / y; }
 bool layer_enough(int slc_cnt, size_t size, int SLICE_SIZE) {
   int n_slc = CEIL(size, SLICE_SIZE);
-  return slc_cnt * 100 >= n_slc * LOSS_RATE;
+  return slc_cnt * 100 >= n_slc * LOSS_RATE && slc_cnt >= 1;
 }
 
 int cur_iter = 0; // TODO: extern
@@ -127,7 +127,7 @@ int config_get_size() {
   return (p == nullptr) ? 1 : atoi(p);
 }
 
-std::string config_get_PS_ip_port(int delta = 0) {
+std::string config_get_PS_ip_port(int delta = 0, bool is_ps = false) {
   auto p1 = getenv("DMLC_PS_ROOT_URI");
   assert(p1);
   auto p2 = getenv("DMLC_PS_ROOT_PORT");
@@ -137,7 +137,7 @@ std::string config_get_PS_ip_port(int delta = 0) {
     int port = atoi(p2) + delta;
     port_s = std::to_string(port);
   }
-  return p1 + std::string(":") + port_s;
+  return (is_ps ? "0.0.0.0" : p1) + std::string(":") + port_s;
 }
 
 std::string config_get_role() {

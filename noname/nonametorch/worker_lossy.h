@@ -31,6 +31,7 @@ public:
               << "! Sending HANDSHAKE\n";
     std::string port_s = config_get_worker_ip() + ":" + std::to_string(port_num);
     udp.send(create_str_msg(HAND_SHAKE_MSG+port_s));
+    std::cout << "Sending " + std::string(create_str_msg(HAND_SHAKE_MSG+port_s)) << "\n";
 
     std::cout << "Receiving HANDSHAKE\n";
     Message message = udp.recv();
@@ -63,7 +64,7 @@ public:
         break;
       }
       int tmp = cur_iter;
-      MYLOG(1) << "sending " << li->name << " with cur_iter=" << cur_iter;
+      MYLOG(2) << "sending " << li->name << " with cur_iter=" << cur_iter;
       udp.lossy_bound_send(li, cur_iter);
       // for (int i = 0; i < CEIL(li->size, SLICE_SIZE); ++i) {
       //   Message msg; msg.resize(sizeof(Request));
@@ -107,7 +108,7 @@ public:
           auto li = lis.find(name)->second;
           int _cur_iter = li->w_iter[0];
           if (req->ls.iter != _cur_iter) continue;
-          MYLOG(1) << "recving " << name + " " << req->ls;
+          MYLOG(2) << "recving " << name + " " << req->ls;
           ASSERT(lis.find(name) != lis.end()) << name << " not found.";
           int st = SLICE_SIZE * req->ls.sid;
           auto &slc_it = li->w_slc_it[0][req->ls.sid];
@@ -118,6 +119,7 @@ public:
               && li->w_iter[0] == _cur_iter) {
             li->w_iter[0]++; // only count once; also close the recv
             li->w_slc_recv_cnt[0] = 0;
+            MYLOG(2) << name + " recv done " << req->ls;
             ready_q.enqueue(li);
           }
           break;
