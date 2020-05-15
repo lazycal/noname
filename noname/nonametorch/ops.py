@@ -14,9 +14,9 @@ if 'ND' in os.environ: cflags += [f"-DNDEBUG"]
 if 'MYLOG_LEVEL' in os.environ: cflags += [f"-DMYLOG_LEVEL={os.environ['MYLOG_LEVEL']}"]
 if 'LOSS_RATE' in os.environ: cflags += [f"-DLOSS_RATE={100-int(os.environ['LOSS_RATE'])}"]
 # if 'SEND_RATE' in os.environ: cflags += [f"-DSEND_RATE={os.environ['SEND_RATE']}"] # send rate
-if 'PP_METHOD' in os.environ:
-    assert os.environ['PP_METHOD'] in ['0', '1']
-    cflags += [f"-DPP_METHOD={os.environ['PP_METHOD']}"]
+# if 'PP_METHOD' in os.environ:
+#     assert os.environ['PP_METHOD'] in ['0', '1']
+#     cflags += [f"-DPP_METHOD={os.environ['PP_METHOD']}"]
 base_dir = os.path.dirname(os.path.abspath(__file__))
 c_lib = load(name='noname.nonametorch.c_lib', sources=[os.path.join(base_dir, 'c_lib.cpp')], verbose=True,
              extra_cflags=cflags, with_cuda=with_cuda, extra_ldflags=['-lpthread', '`pkg-config libzmq --libs`'],

@@ -13,16 +13,16 @@
 #include <thread>
 #include <torch/extension.h>
 
-#ifndef PP_METHOD
-#define PP_METHOD 1 // for udp; 0 for tcp
-#endif
-#if PP_METHOD == 0
-using PushPullMethod=VanillaPushPull;
-using PSMethod=VanillaPS;
-#elif PP_METHOD == 1
-using PushPullMethod=LossyPushPull;
-using PSMethod=LossyPS;
-#endif
+// #ifndef PP_METHOD
+// #define PP_METHOD 1 // for udp; 0 for tcp
+// #endif
+// #if PP_METHOD == 0
+// using PushPullMethod=VanillaPushPull;
+// using PSMethod=VanillaPS;
+// #elif PP_METHOD == 1
+// using PushPullMethod=LossyPushPull;
+// using PSMethod=LossyPS;
+// #endif
 class CommunicationManager {
 public:
   const std::map<std::string, LayerInfo *> &lis;
@@ -30,7 +30,10 @@ public:
   std::unique_ptr<PushPullProtocol> p3;
   CommunicationManager(const std::map<std::string, LayerInfo *> &lis)
       : lis(lis) {}
-  void set_p3() { p3 = std::make_unique<PushPullMethod>(); }
+  void set_p3() {
+    if (get_PP_METHOD() == 0) p3 = std::make_unique<VanillaPushPull>();
+    else p3 = std::make_unique<LossyPushPull>();
+  }
   void push_pull(std::string name) {
     auto it = lis.find(name);
     assert(it != lis.end());
@@ -145,7 +148,9 @@ void declare_done() {
   auto role = config_get_role();
   if (role == "server") {
     std::cout << "launching server...\n";
-    auto p = new PSMethod();
+    PS* p;
+    if (get_PP_METHOD() == 0) p = new VanillaPS();
+    else p = new LossyPS();
     p->run();
   } else {
     std::cout << "launching worker...\n";

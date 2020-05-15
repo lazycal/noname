@@ -10,7 +10,7 @@ class PS {
 public:
   int nw;
   PS() : nw(config_get_size()) {}
-  void run() {}
+  virtual void run() = 0;
 };
 class ReliableBcast {
   std::vector<zmq::socket_t> senders;

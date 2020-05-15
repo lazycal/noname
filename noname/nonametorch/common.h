@@ -31,6 +31,14 @@ static_assert(SLICE_SIZE % 4 == 0, "SLICE_SIZE % 4 !=0");
 #ifndef LOSS_RATE
 #define LOSS_RATE 90 // /100
 #endif
+
+int get_PP_METHOD() {
+  auto p = getenv("PP_METHOD");
+  int ppm = 1; // 1 for udp; 0 for tcp;
+  if (p != nullptr) ppm = std::atoi(p);
+  return ppm;
+}
+
 inline int CEIL(int x, int y) { return (x + y - 1) / y; }
 bool layer_enough(int slc_cnt, size_t size, int SLICE_SIZE) {
   int n_slc = CEIL(size, SLICE_SIZE);
