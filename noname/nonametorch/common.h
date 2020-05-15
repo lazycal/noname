@@ -13,12 +13,11 @@
 #include "helper_cuda.h"
 #include <cuda_runtime.h>
 
-void _malloc(void **ptr, size_t size) { cudaMallocHost(ptr, size); }
-void _free(void *ptr) { cudaFreeHost(ptr); }
-#else
+void _malloc_cuda(void **ptr, size_t size) { cudaMallocHost(ptr, size); }
+void _free_cuda(void *ptr) { cudaFreeHost(ptr); }
+#endif
 void _malloc(void **ptr, size_t size) { *ptr = malloc(size); }
 void _free(void *ptr) { free(ptr); }
-#endif
 
 const std::string HAND_SHAKE_MSG = "noname__start!";
 const std::string SHUTDOWN_MSG = "#SHUTDOWN#";
@@ -26,9 +25,9 @@ const std::string SHUTDOWN_MSG = "#SHUTDOWN#";
 const int MAX_BYTES_AVAI = 100000;
 const int SLICE_SIZE = 512;
 static_assert(SLICE_SIZE % 4 == 0, "SLICE_SIZE % 4 !=0");
-#ifndef SEND_RATE
-#define SEND_RATE 10000 // Bytes per milisecond
-#endif
+// #ifndef SEND_RATE
+// #define SEND_RATE 10000 // Bytes per milisecond
+// #endif
 #ifndef LOSS_RATE
 #define LOSS_RATE 90 // /100
 #endif
@@ -67,7 +66,7 @@ struct LayerInfo {
     ASSERT(size < 1ll << 31) << "size=" << size << " too long.";
     if (tensor.device().is_cuda()) {
       void *tmp;
-      _malloc(&tmp, size);
+      _malloc_cuda(&tmp, size);
       buf = reinterpret_cast<uint8_t*>(tmp);
     } else
       buf = reinterpret_cast<uint8_t*>(tensor.data_ptr<float>());
@@ -78,7 +77,7 @@ struct LayerInfo {
   }
   ~LayerInfo() {
     if (tensor.device().is_cuda())
-      _free(reinterpret_cast<void*>(buf));
+      _free_cuda(reinterpret_cast<void*>(buf));
     _free(reinterpret_cast<void*>(ps_buf[1]));
   }
 };

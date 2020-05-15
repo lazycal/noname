@@ -33,7 +33,8 @@ struct Request {
     MSG,
     LS
   } type;
-  unsigned short seq;
+  // unsigned short seq;
+  long long ts;
   union {
     struct {
       int len;
@@ -49,6 +50,7 @@ struct Request {
 
 struct Response {
   int /*ack_seq*/iter, idx, sid;
+  long long ts;
 };
 static_assert(sizeof(Request) != sizeof(Response), "sizeof(Request) != sizeof(Response)");
 
@@ -97,14 +99,15 @@ Message create_str_msg(std::string s) {
   return msg;
 }
 
-#ifndef DMLC_RTT
-#define DMLC_RTT 10 // Bytes per milisecond
-#endif
-#ifndef DMLC_BUC_SZ
-#define DMLC_BUC_SZ 100 // /100
-#endif
+// #ifndef DMLC_RTT
+// #define DMLC_RTT 10
+// #endif
+// #ifndef DMLC_BUC_SZ
+// #define DMLC_BUC_SZ 100 // /100
+// #endif
 class UDPSocket {
 private:
+  const double ALPHA = 0.3;
   struct info {
     LayerInfo *li;
     int iter;
@@ -113,13 +116,30 @@ private:
   };
   ThreadSafeQueue<Message> *recv_q, *send_q;
   ThreadSafeQueue<info> layer_q, ack_q;
-  bool del{false};
-  int fd, rtt{DMLC_RTT}, peer_rank, wind_sz{DMLC_BUC_SZ}; // TODO: measure rtt
+  bool del{false}, autortt;
+  int fd, peer_rank, wind_sz, SEND_RATE; // TODO: measure rtt
+  double rtt, acc_sr;
   std::thread *_t;
 public:
   bool connected{false};
   UDPSocket(int peer_rank, ThreadSafeQueue<Message> *_recv_q=nullptr): 
     recv_q(_recv_q), peer_rank(peer_rank) {
+    
+    auto rttp = getenv("DMLC_RTT");
+    if (rttp != nullptr) {
+      autortt = false;
+      rtt = atoi(rttp);
+    } else {
+      autortt = true;
+      rtt = 10;
+    }
+    auto SEND_RATEp = getenv("SEND_RATE");
+    if (SEND_RATEp != nullptr) SEND_RATE = atoi(SEND_RATEp);
+    else SEND_RATE = 10000;
+    auto wind_szp = getenv("DMLC_BUC_SZ");
+    if (wind_szp != nullptr) wind_sz = atoi(wind_szp);
+    else wind_sz = 10;
+    std::cout << "setting rtt to " << rtt << " autortt=" << autortt << " SEND_RATE to " << SEND_RATE << " BUC_SZ=" << wind_sz << "\n";
     if (recv_q == nullptr) {
       recv_q = new ThreadSafeQueue<Message>;
       del = true;
@@ -151,7 +171,7 @@ public:
       auto inf = layer_q.dequeue();
       int n_ack = 0;
       LayerInfo *li = inf.li;
-      if (li == nullptr) { // it's an ack
+      if (li == nullptr) { // it's an ack // TODO: mvoe to recv thread
         recv_ack(inf.m);
         continue;
       }
@@ -167,6 +187,8 @@ public:
         }
         Message msg; msg.resize(sizeof(Request));
         auto req = reinterpret_cast<Request*>(msg.data());
+        long long begin_ms = get_ms();
+        req->ts = begin_ms;
         req->type = Request::LS;
         req->ls.initMeta(li->idx, li->priority, config_get_rank2(), i, iter);
         if (iter != li->iter) {
@@ -180,7 +202,7 @@ public:
         auto res = this->send(msg);
       }
       if (!expired && !layer_enough(n_ack, li->size, SLICE_SIZE)) {
-        inf.ms = begin + std::chrono::milliseconds(rtt);
+        inf.ms = begin + std::chrono::milliseconds((int)rtt);
         ack_q.enqueue(inf);
       } else {
         MYLOG(2) << "Sent " << li->name << " with iter=" << iter << 
@@ -255,10 +277,10 @@ public:
 
   void refill(int &bytes_avai, std::chrono::steady_clock::time_point &begin) {
     auto end = std::chrono::steady_clock::now();
-    int el = std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
-    bytes_avai = std::min(MAX_BYTES_AVAI * 1ll, 1ll * SEND_RATE * el);
+    int el = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
+    bytes_avai = std::min(MAX_BYTES_AVAI * 1ll, bytes_avai + 1ll * SEND_RATE * el);
     begin = end;
-    MYLOG(1) << "refilling to " << bytes_avai << " with el=" << el/1000. << "s";
+    // if ((rand() & 0xff) == 0) MYLOG(3) << "refilling to " << bytes_avai << " with el=" << el/1000. << "s";
   }
 
   void run_sender() {
@@ -269,10 +291,14 @@ public:
       assert(this->connected);
       if (bytes_avai < 0) while (1) {
         refill(bytes_avai, begin);
-        if (bytes_avai < 0) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (bytes_avai < 0) std::this_thread::sleep_for(std::chrono::milliseconds(10));
         else break;
       }
+      // if ((rand() & 0xff) == 0) MYLOG(3) << "bytes_avai=" << bytes_avai;
       // if bytes_avai > 0 then considered available for sending
+      // if (m.size() == sizeof(Request)) {
+      //   reinterpret_cast<Request*>(m.data())->ts = get_ms();
+      // }
       int n;
       if ((n = ::send(fd, m.data(), m.size(), 0)) == -1) {
         perror("send error");
@@ -290,16 +316,28 @@ public:
     Message am; am.resize(sizeof(Response));
     auto rp = reinterpret_cast<Response*>(am.data());
     rp->idx = rq->ls.idx; rp->sid = rq->ls.sid; rp->iter = rq->ls.iter + 1;
+    rp->ts = rq->ts;
     // MYLOG(2) << "sending ack " << + rp->idx << " iter=" << rp->iter - 1 << " sid="  << rp->sid;
     send(am);
   }
 
+  long long get_ms() {
+    using namespace std::chrono;
+    return duration_cast< milliseconds >(system_clock::now().time_since_epoch()).count();
+  }
   void recv_ack(Message &m) {
     auto rp = reinterpret_cast<Response*>(m.data());
     auto li = lis.find(layer_names.find(rp->idx)->second)->second;
     if (li->ack[peer_rank][rp->sid] < rp->iter) {
       li->ack[peer_rank][rp->sid] = rp->iter;
       MYLOG(2) << "ack " + li->name << " iter=" << rp->iter - 1 << " sid="  << rp->sid;
+    }
+    if (autortt) {
+      long long n_rtt = get_ms() - rp->ts;
+      if ((rand() & 0xfff) == 0)
+        MYLOG(3) << "old_accumulated_rtt=" << rtt << " n_rtt=" << n_rtt << " new_accumulated_rtt=" <<
+        rtt * ALPHA + (1 - ALPHA) * n_rtt;
+      rtt = rtt * ALPHA + (1 - ALPHA) * n_rtt;
     }
     // TODO: fence
   }

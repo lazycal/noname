@@ -139,6 +139,7 @@ void LossyPS::run_recver() {
           iter_cnt = std::max(iter_cnt, req->ls.iter);
           int rank = req->ls.rank;
           MYLOG(1) << "recving " << name + " " << req->ls << " " << "iter=" << li->w_iter[rank];
+          // if (li->w_iter[rank] > li->acc_iter) continue; // TEST
           if (li->w_recv_cnt == 0 && li->dirty) { // clear the server's buffer
             memset(li->ps_buf[li->acc_iter&1], 0, li->size);
             // li->tensor.zero_();
