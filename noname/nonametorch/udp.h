@@ -105,6 +105,7 @@ Message create_str_msg(std::string s) {
 // #ifndef DMLC_BUC_SZ
 // #define DMLC_BUC_SZ 100 // /100
 // #endif
+const int MAX_BYTES_AVAI = 100000;
 class UDPSocket {
 private:
   const double ALPHA = 0.3;

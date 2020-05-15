@@ -22,7 +22,6 @@ void _free(void *ptr) { free(ptr); }
 const std::string HAND_SHAKE_MSG = "noname__start!";
 const std::string SHUTDOWN_MSG = "#SHUTDOWN#";
 
-const int MAX_BYTES_AVAI = 100000;
 const int SLICE_SIZE = 512;
 static_assert(SLICE_SIZE % 4 == 0, "SLICE_SIZE % 4 !=0");
 // #ifndef SEND_RATE
