@@ -108,7 +108,7 @@ Message create_str_msg(std::string s) {
 const int MAX_BYTES_AVAI = 100000;
 class UDPSocket {
 private:
-  const double ALPHA = 0.3;
+  const double ALPHA = 0.9, BETA = 2;
   struct info {
     LayerInfo *li;
     int iter;
@@ -119,6 +119,7 @@ private:
   ThreadSafeQueue<info> layer_q, ack_q;
   bool del{false}, autortt;
   int fd, peer_rank, wind_sz, SEND_RATE; // TODO: measure rtt
+  int bytes_avai{MAX_BYTES_AVAI};
   double rtt, acc_sr;
   std::thread *_t;
 public:
@@ -173,19 +174,20 @@ public:
       int n_ack = 0;
       LayerInfo *li = inf.li;
       if (li == nullptr) { // it's an ack // TODO: mvoe to recv thread
-        recv_ack(inf.m);
+        ASSERT(false) << "li should not be null";
         continue;
       }
       int iter = inf.iter;
       bool expired = false, is_worker = config_get_role() == "worker";
       auto begin = std::chrono::steady_clock::now();
       MYLOG(2) << "udp sending " << li->name << " iter=" << iter << " peer=" << peer_rank << " send_q.size=" << send_q->q.size();
-      for (int i = 0; i < CEIL(li->size, SLICE_SIZE); ++i) {
+      for (int i = 0, tt_slc = CEIL(li->size, SLICE_SIZE); i < tt_slc; ++i) {
         // ASSERT(li->ack[peer_rank][i] >= iter) << li->ack[peer_rank][i] << " " << iter;
         if (li->ack[peer_rank][i] > iter) {
           n_ack++;
           continue; // acked
         }
+        // if (i  / 2 * 1. / tt_slc > THRES) break;
         Message msg; msg.resize(sizeof(Request));
         auto req = reinterpret_cast<Request*>(msg.data());
         long long begin_ms = get_ms();
@@ -203,7 +205,7 @@ public:
         auto res = this->send(msg);
       }
       if (!expired && !layer_enough(n_ack, li->size, SLICE_SIZE)) {
-        inf.ms = begin + std::chrono::milliseconds((int)rtt);
+        inf.ms = begin + std::chrono::milliseconds((int)(rtt*BETA));
         ack_q.enqueue(inf);
       } else {
         MYLOG(2) << "Sent " << li->name << " with iter=" << iter << 
@@ -285,7 +287,6 @@ public:
   }
 
   void run_sender() {
-    int bytes_avai = MAX_BYTES_AVAI;
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     for (unsigned int i = 0; ; i++) {
       Message m = send_q->dequeue();
@@ -346,9 +347,10 @@ public:
   void do_ack(Message &m) {
     if (m.size() == sizeof(Request)) send_ack(m);
     else {
-      info inf{nullptr};
-      inf.m = m;
-      layer_q.enqueue(inf);//recv_ack(m);
+      // info inf{nullptr};
+      // inf.m = m;
+      // layer_q.enqueue(inf);
+      recv_ack(m);
     }
   }
 

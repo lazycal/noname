@@ -27,10 +27,10 @@ static_assert(SLICE_SIZE % 4 == 0, "SLICE_SIZE % 4 !=0");
 // #ifndef SEND_RATE
 // #define SEND_RATE 10000 // Bytes per milisecond
 // #endif
-#ifndef LOSS_RATE
-#define LOSS_RATE 90 // /100
-#endif
-
+// #ifndef LOSS_RATE
+// #define LOSS_RATE 90 // /100
+// #endif
+int THRES = 90;
 int get_PP_METHOD() {
   auto p = getenv("PP_METHOD");
   int ppm = 1; // 1 for udp; 0 for tcp;
@@ -41,7 +41,7 @@ int get_PP_METHOD() {
 inline int CEIL(int x, int y) { return (x + y - 1) / y; }
 bool layer_enough(int slc_cnt, size_t size, int SLICE_SIZE) {
   int n_slc = CEIL(size, SLICE_SIZE);
-  return slc_cnt * 100 >= n_slc * LOSS_RATE && slc_cnt >= 1;
+  return slc_cnt * 100 >= n_slc * THRES && slc_cnt >= 1;
 }
 
 int cur_iter = 0; // TODO: extern
@@ -167,4 +167,12 @@ std::string config_get_worker_ip() {
   auto p = getenv("WORKER_IP");
   assert(p);
   return p;
+}
+
+void config_init() {
+  auto p = getenv("THRES");
+  if (p) {
+    THRES = std::atoi(p);
+  }
+  std::cout << "setting THRES to " << THRES << "\n";
 }

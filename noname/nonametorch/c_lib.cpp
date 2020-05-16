@@ -142,7 +142,9 @@ void synchronize(const std::string &name) {
   });
 }
 
-void init() {}
+void init() {
+  config_init();
+}
 
 void declare_done() {
   auto role = config_get_role();

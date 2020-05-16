@@ -303,12 +303,15 @@ def test():
 import time
 st = time.time()
 profile['epoch_time'] = []
+profile['epoch_time1'] = []
 for epoch in range(1, args.epochs + 1):
     st1 = time.time()
     train(epoch)
     test()
     profile['epoch_time'].append(time.time())
-    print("Epoch time: %ss this epoch time: %ss"%((time.time() - st) / epoch, (time.time() - st1)))
+    profile['epoch_time1'].append(time.time() - st1)
+    print("Epoch time: %ss this epoch time: %ss"%
+      (np.array(profile['epoch_time1'][1:]).mean(), (time.time() - st1)))
 print('total train time=%ss'%(time.time() - st))
 profile['total_time'] = time.time() - st
 import json
