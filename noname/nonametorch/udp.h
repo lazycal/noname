@@ -105,7 +105,7 @@ Message create_str_msg(std::string s) {
 // #ifndef DMLC_BUC_SZ
 // #define DMLC_BUC_SZ 100 // /100
 // #endif
-const int MAX_BYTES_AVAI = 100000;
+const int MAX_BYTES_AVAI = 1000000;
 class UDPSocket {
 private:
   const double ALPHA = 0.9, BETA = 2;
@@ -122,11 +122,13 @@ private:
   int bytes_avai{MAX_BYTES_AVAI};
   double rtt, acc_sr;
   std::thread *_t;
+  long long begin;
 public:
   bool connected{false};
   UDPSocket(int peer_rank, ThreadSafeQueue<Message> *_recv_q=nullptr): 
     recv_q(_recv_q), peer_rank(peer_rank) {
-    
+
+    begin = get_ms(); //std::chrono::steady_clock::now();
     auto rttp = getenv("DMLC_RTT");
     if (rttp != nullptr) {
       autortt = false;
@@ -179,7 +181,7 @@ public:
       }
       int iter = inf.iter;
       bool expired = false, is_worker = config_get_role() == "worker";
-      auto begin = std::chrono::steady_clock::now();
+      auto st = std::chrono::steady_clock::now();
       MYLOG(2) << "udp sending " << li->name << " iter=" << iter << " peer=" << peer_rank << " send_q.size=" << send_q->q.size();
       for (int i = 0, tt_slc = CEIL(li->size, SLICE_SIZE); i < tt_slc; ++i) {
         // ASSERT(li->ack[peer_rank][i] >= iter) << li->ack[peer_rank][i] << " " << iter;
@@ -202,10 +204,12 @@ public:
         int st = SLICE_SIZE * i;
         uint8_t *p_buf = is_worker ? li->buf : li->ps_buf[iter&1];
         memcpy(req->ls.data, p_buf + st, std::min(SLICE_SIZE, (int)li->size - st));
-        auto res = this->send(msg);
+        // auto res = this->send(msg);
+        this->_send_msg(msg);
+        // ::send(fd, msg.data(), msg.size(), 0);
       }
       if (!expired && !layer_enough(n_ack, li->size, SLICE_SIZE)) {
-        inf.ms = begin + std::chrono::milliseconds((int)(rtt*BETA));
+        inf.ms = st + std::chrono::milliseconds((int)(rtt*BETA));
         ack_q.enqueue(inf);
       } else {
         MYLOG(2) << "Sent " << li->name << " with iter=" << iter << 
@@ -278,19 +282,14 @@ public:
     connect(ntohl(addr_int), std::stoi(port));
   }
 
-  void refill(int &bytes_avai, std::chrono::steady_clock::time_point &begin) {
-    auto end = std::chrono::steady_clock::now();
-    int el = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
+  void refill(int &bytes_avai, long long &begin) {
+    auto end = get_ms(), el = end - begin;
     bytes_avai = std::min(MAX_BYTES_AVAI * 1ll, bytes_avai + 1ll * SEND_RATE * el);
     begin = end;
     // if ((rand() & 0xff) == 0) MYLOG(3) << "refilling to " << bytes_avai << " with el=" << el/1000. << "s";
   }
 
-  void run_sender() {
-    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-    for (unsigned int i = 0; ; i++) {
-      Message m = send_q->dequeue();
-      assert(this->connected);
+  void _send_msg(Message &m) {
       if (bytes_avai < 0) while (1) {
         refill(bytes_avai, begin);
         if (bytes_avai < 0) std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -309,6 +308,13 @@ public:
       ASSERT(n == sizeof(Request) || n == sizeof(Response)) << n;
       bytes_avai -= n + 28;
       // if ((i & 0xf) == 0) refill(bytes_avai, begin);
+  }
+
+  void run_sender() {
+    for (unsigned int i = 0; ; i++) {
+      Message m = send_q->dequeue();
+      assert(this->connected);
+      _send_msg(m);
     }
   }
 
@@ -320,7 +326,8 @@ public:
     rp->idx = rq->ls.idx; rp->sid = rq->ls.sid; rp->iter = rq->ls.iter + 1;
     rp->ts = rq->ts;
     // MYLOG(2) << "sending ack " << + rp->idx << " iter=" << rp->iter - 1 << " sid="  << rp->sid;
-    send(am);
+    // send(am);
+    ::send(fd, am.data(), am.size(), 0);
   }
 
   long long get_ms() {
