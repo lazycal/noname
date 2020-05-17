@@ -167,6 +167,8 @@ void LossyPS::run_recver() {
               li->w_iter[rank]++; // only count once for each worker
               // do the average
               if (++li->w_recv_cnt == nw) { // TODO softer?
+                int num_params = li->size / sizeof(float);
+                float *ps = reinterpret_cast<float*>(li->ps_buf[li->acc_iter&1]);
                 for (int i = 0; i < num_params; ++i)
                   ps[i] /= nw;
                 li->w_recv_cnt = 0;
